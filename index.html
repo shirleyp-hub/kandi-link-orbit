@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KANDI LINK ORBIT simulator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;800&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+  <link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="logo">KANDI<span> LINK</span></div>
+    <div class="tag">ORBIT live simulator</div>
+    <div class="hud" id="hud"></div>
+  </header>
+
+  <main class="layout">
+    <section class="stage">
+      <div id="three" class="three" aria-label="3D view of the ORBIT bangle"></div>
+      <div class="stage-bar">
+        <button type="button" id="twistL">Twist left</button>
+        <button type="button" id="core" class="core">Core</button>
+        <button type="button" id="twistR">Twist right</button>
+        <button type="button" id="explode" class="ghost">Exploded view</button>
+      </div>
+      <div class="buzz" id="buzz" aria-live="polite"></div>
+      <div class="info" id="info" hidden></div>
+    </section>
+
+    <aside class="side">
+      <div class="panel">
+        <div class="label">Festival map, 800 m square</div>
+        <canvas id="map" width="560" height="560" aria-label="Festival map with you and your crew"></canvas>
+        <div class="hint">WASD or arrows to walk and turn. Q and E twist. Click the map to auto walk.</div>
+      </div>
+
+      <div class="panel" id="readout"></div>
+
+      <div class="panel">
+        <div class="label">Core gestures</div>
+        <ul class="gestures">
+          <li><b>Click</b> start or stop seeking</li>
+          <li><b>Hold 2 s</b> meet at me beacon</li>
+          <li><b>Double click</b> ghost mode</li>
+          <li><b>Triple click</b> SOS to crew</li>
+        </ul>
+      </div>
+
+      <div class="panel">
+        <div class="label">Customize</div>
+        <div class="row"><span>Ring</span><div class="chips" id="finish"></div></div>
+        <div class="row"><span>Resin</span><div class="chips" id="resin"></div></div>
+        <div class="row"><span>Gem cut</span><div class="chips" id="gem"></div></div>
+        <div class="row"><span>Idle light</span><div class="chips" id="mood"></div></div>
+      </div>
+
+      <div class="panel">
+        <div class="label">Simulation</div>
+        <div class="row"><span>Crew wander</span><input type="range" id="wander" min="0" max="3" step="0.1" value="1"></div>
+        <div class="row"><span>GPS noise</span><input type="range" id="noise" min="0" max="10" step="0.5" value="4"></div>
+        <div class="row"><span>Time speed</span><input type="range" id="speed" min="1" max="20" step="1" value="5"></div>
+        <button type="button" id="drop" class="ghost wide">Drop a friend's signal</button>
+      </div>
+    </aside>
+  </main>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
