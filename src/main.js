@@ -1,387 +1,401 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { CREW, SIZE, STAGES, createWorld, step, relation, move } from './sim.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
+import { createFestival, createAvatar, STAGE_Z } from './festival.js';
+import { createBangle, CREW } from './bangle.js';
 
 const $ = (id) => document.getElementById(id);
-const world = createWorld();
-const state = {
-  sel: 2, ringAngle: 0, seeking: true, exploded: 0, explodeTarget: 0,
-  finish: 0, resin: 0, gem: 0, mood: 0, speed: 5, sosFlash: 0,
-};
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const wrap180 = (d) => ((d % 360) + 540) % 360 - 180;
 
-// ---------- scene ----------
-const host = $('three');
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+// ---------------- world ----------------
+const worldEl = $('world');
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.85;
-host.appendChild(renderer.domElement);
-const scene = new THREE.Scene();
-const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-scene.environmentIntensity = 0.35;
-scene.background = new THREE.Color(0x0a0612);
-scene.fog = new THREE.Fog(0x0a0612, 9, 18);
-const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
-camera.position.set(0, 4.2, 6.2);
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true; controls.minDistance = 3.5; controls.maxDistance = 14;
-controls.target.set(0, 0.2, 0);
+renderer.toneMappingExposure = 1.0;
+worldEl.appendChild(renderer.domElement);
+const labels = new CSS2DRenderer();
+labels.domElement.style.cssText = 'position:fixed;inset:0;pointer-events:none';
+document.body.insertBefore(labels.domElement, worldEl.nextSibling);
 
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 400);
+const fest = createFestival(scene);
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.9, 0.45, 0.6);
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.75, 0.55, 0.7);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
-const R = 1.6;               // inner ring radius
-const N = 60;                // LEDs in the light ribbon
-const parts = {};            // name -> { group, info, baseY, explodeY }
-
-function part(name, info, explodeY) {
-  const g = new THREE.Group(); g.userData.part = name;
-  scene.add(g);
-  parts[name] = { group: g, info, explodeY };
-  return g;
-}
-
-// 01 selector ring with gems
-const FINISHES = [
-  { name: 'Liquid silver', color: 0xf2eeff, rough: 0.12, irid: 0 },
-  { name: 'Oil slick', color: 0xb9a8ff, rough: 0.18, irid: 1 },
-  { name: 'Midnight', color: 0x2a2538, rough: 0.3, irid: 0 },
-  { name: 'Rose gold', color: 0xf3c2b2, rough: 0.15, irid: 0 },
+// crew spread through the crowd, Dani behind you to the right
+const START = { x: 0, z: -42 };
+const SPOTS = [
+  { x: -30, z: -70 }, { x: 22, z: 6 }, { x: 36, z: -14 }, { x: -40, z: -18 },
+  { x: 10, z: -72 }, { x: -18, z: 18 }, { x: 46, z: -50 }, { x: -52, z: -44 },
 ];
-const ringMat = new THREE.MeshPhysicalMaterial({ metalness: 1, roughness: 0.12, color: 0xf2eeff, iridescence: 0, iridescenceIOR: 1.8 });
-const sel = part('selector', {
-  num: '01', title: 'Selector ring', text: 'Anodized titanium ring that spins freely around the resin. Eight snap in gem sockets. Magnets under each socket click past a hall sensor so the band knows which friend you picked.',
-  specs: [['Material', 'Grade 2 titanium'], ['Detents', '8 magnetic'], ['Cost est', '$3.50 with gems']],
-}, 1.5);
-const ringPivot = new THREE.Group(); sel.add(ringPivot);
-const ringMesh = new THREE.Mesh(new THREE.TorusGeometry(R + 0.36, 0.07, 24, 200), ringMat);
-ringMesh.rotation.x = Math.PI / 2; ringMesh.userData.part = 'selector'; ringPivot.add(ringMesh);
-const GEMS = [
-  { name: 'Faceted', geo: () => new THREE.OctahedronGeometry(0.13, 0) },
-  { name: 'Cabochon', geo: () => new THREE.SphereGeometry(0.12, 24, 16) },
-  { name: 'Pony bead', geo: () => new THREE.CylinderGeometry(0.1, 0.1, 0.16, 20, 1, true) },
+const friends = CREW.map((c, i) => {
+  const a = createAvatar(scene, c.hex, { armsUp: true });
+  a.group.position.set(SPOTS[i].x, 0, SPOTS[i].z);
+  a.group.rotation.y = Math.PI;
+  const el = document.createElement('div'); el.className = 'label'; el.style.color = c.hex;
+  const lab = new CSS2DObject(el); lab.position.set(0, 2.6, 0); a.group.add(lab);
+  return { ...a, c, el, lab, home: { ...SPOTS[i] }, ph: i * 0.9 };
+});
+const you = createAvatar(scene, '#FFFFFF', { armsUp: false });
+you.halo.material.color.set('#EDE6FF');
+const youLabelEl = document.createElement('div'); youLabelEl.className = 'label'; youLabelEl.style.color = '#EDE6FF'; youLabelEl.textContent = 'YOU';
+const youLabel = new CSS2DObject(youLabelEl); youLabel.position.set(0, 2.4, 0); you.group.add(youLabel);
+
+// ground guide from you to the friend, a ribbon of light
+const guideGeo = new THREE.PlaneGeometry(1, 1, 1, 1); guideGeo.translate(0, 0.5, 0); guideGeo.rotateX(-Math.PI / 2);
+const guideMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
+  uniforms: { t: { value: 0 }, c: { value: new THREE.Color('#FF4FB8') }, o: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }',
+  fragmentShader: `uniform float t; uniform vec3 c; uniform float o; varying vec2 vUv;
+    void main(){ float edge = smoothstep(.5,.0,abs(vUv.x-.5));
+      float dash = smoothstep(.3,.5,fract(vUv.y*24.-t*2.)) * smoothstep(1.,.7,fract(vUv.y*24.-t*2.));
+      float fade = smoothstep(0.,.08,vUv.y)*smoothstep(1.,.85,vUv.y);
+      gl_FragColor = vec4(c*(.35+dash)*edge*fade*o, 1.); }`,
+});
+const guide = new THREE.Mesh(guideGeo, guideMat); guide.position.y = 0.03; scene.add(guide);
+
+// reunion burst
+const burstN = 400;
+const burstGeo = new THREE.BufferGeometry();
+const bp = new Float32Array(burstN * 3), bv = [];
+burstGeo.setAttribute('position', new THREE.BufferAttribute(bp, 3));
+const burst = new THREE.Points(burstGeo, new THREE.PointsMaterial({ size: 0.12, color: 0xffffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+scene.add(burst);
+function fireBurst(x, z, hex) {
+  burst.material.color.set(hex); burst.material.opacity = 1;
+  for (let i = 0; i < burstN; i++) {
+    bp.set([x, 1.6, z], i * 3);
+    const a = Math.random() * Math.PI * 2, u = Math.random() * 2 - 1, s = 2 + Math.random() * 5;
+    bv[i] = [Math.sqrt(1 - u * u) * Math.cos(a) * s, Math.abs(u) * s + 2, Math.sqrt(1 - u * u) * Math.sin(a) * s];
+  }
+  burstGeo.attributes.position.needsUpdate = true;
+}
+
+// ---------------- wrist view ----------------
+const wristEl = $('wristView');
+const wr = new THREE.WebGLRenderer({ antialias: true });
+wr.setPixelRatio(Math.min(devicePixelRatio, 2));
+wr.toneMapping = THREE.ACESFilmicToneMapping; wr.toneMappingExposure = 0.8;
+wristEl.appendChild(wr.domElement);
+const ws = new THREE.Scene();
+ws.background = new THREE.Color(0x0b0716);
+const pm = new THREE.PMREMGenerator(wr);
+ws.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture; ws.environmentIntensity = 0.22;
+const wcam = new THREE.PerspectiveCamera(34, 1, 0.1, 50);
+const band = createBangle(ws);
+const wcomp = new EffectComposer(wr);
+wcomp.addPass(new RenderPass(ws, wcam));
+const wbloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.8, 0.45, 0.75);
+wcomp.addPass(wbloom); wcomp.addPass(new OutputPass());
+// subtle skin disc under the band so it reads as worn
+const skin = new THREE.Mesh(new THREE.CircleGeometry(1.32, 64), new THREE.MeshPhysicalMaterial({ color: 0x2a1c1f, roughness: 0.7, sheen: 0.6, sheenColor: new THREE.Color(0x8a5a55), sheenRoughness: 0.6 }));
+skin.rotation.x = -Math.PI / 2; skin.position.y = -0.12; ws.add(skin);
+
+// ---------------- state ----------------
+const S = {
+  mode: 'story', step: 0, stepT: 0, playing: true,
+  sel: 0, target: 2, pickedByUser: false,
+  pos: { x: START.x, z: START.z }, heading: 0, walked: 0,
+  explode: false, bandMode: 'idle', foundAt: null,
+  cam: new THREE.Vector3(0, 40, 20), look: new THREE.Vector3(0, 0, -40),
+};
+const trail = [];
+
+const STEPS = [
+  { id: 'lost', title: 'Lost', dur: 8, k: '01 · Lost', t: 'Headliner drops. Phone dies. Crew gone.', b: 'Nine hundred people between you and your friends. No bars, no battery, no meeting spot that anyone can find in the dark.' },
+  { id: 'pick', title: 'Pick', dur: 6.5, k: '02 · Pick', t: 'Twist the ring to Dani.', b: 'Each click lands on one friend\'s gem. One buzz per position, so you can do it without looking. Tap a different friend below to change who you find.' },
+  { id: 'point', title: 'Point', dur: 6.5, k: '03 · Point', t: 'The light finds her.', b: 'A point of light swings around the band and stops where Dani is. Right now that is behind you, to the right.' },
+  { id: 'walk', title: 'Walk', dur: null, k: '04 · Walk', t: 'Turn until the light is ahead. Go.', b: 'The light stays locked on Dani as you turn and move. The tail shortens as you close in. Under 10 m the whole ring starts breathing.' },
+  { id: 'found', title: 'Found', dur: 10, k: '05 · Found', t: 'Found. No phone needed.', b: '' },
 ];
-const gemMeshes = CREW.map((c, i) => {
-  const m = new THREE.Mesh(GEMS[0].geo(), new THREE.MeshPhysicalMaterial({ color: c.hex, roughness: 0.05, transmission: 0.4, thickness: 0.3, emissive: c.hex, emissiveIntensity: 0.25 }));
-  const a = (i / 8) * Math.PI * 2;
-  m.position.set(Math.sin(a) * (R + 0.36), 0.1, Math.cos(a) * (R + 0.36));
-  m.userData.part = 'selector';
-  ringPivot.add(m);
-  return m;
+
+// ---------------- UI ----------------
+const stepsEl = $('steps');
+STEPS.forEach((s, i) => {
+  const li = document.createElement('li');
+  li.innerHTML = `<button type="button" aria-label="Go to step ${s.title}"><span class="bar"><i></i></span><span class="lab">${s.title}</span></button>`;
+  li.querySelector('button').onclick = () => goStep(i);
+  stepsEl.appendChild(li);
 });
-// notch marker at the front of the resin
-const notch = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-notch.rotation.x = Math.PI / 2; notch.position.set(0, 0.25, R + 0.2);
-
-// 02 resin shell
-const RESINS = [
-  { name: 'Crystal', color: 0xffffff, t: 1 }, { name: 'Smoke', color: 0x3a3050, t: 0.75 },
-  { name: 'Ice', color: 0xbff8ff, t: 0.95 }, { name: 'Lilac', color: 0xd8c4ff, t: 0.95 }, { name: 'UV glow', color: 0xeaff9c, t: 0.9 },
-];
-const resinMat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, transmission: 1, roughness: 0.08, thickness: 0.4, ior: 1.45, clearcoat: 0.6, clearcoatRoughness: 0.2, envMapIntensity: 0.6 });
-const resin = part('resin', {
-  num: '02', title: 'Resin shell', text: 'Optical clear cast polyurethane, 7 mm deep. The inner face is frosted so the light reads as a soft glow instead of hard dots. Sealed to IP54.',
-  specs: [['Inner size', 'S 58, M 63, L 68 mm'], ['Band', '9 mm wide'], ['Cost est', '$2.20']],
-}, 0.75);
-const resinMesh = new THREE.Mesh(new THREE.TorusGeometry(R, 0.24, 48, 220), resinMat);
-resinMesh.rotation.x = Math.PI / 2; resinMesh.userData.part = 'resin';
-resin.add(resinMesh); resin.add(notch);
-
-// 03 light ribbon
-const ribbon = part('ribbon', {
-  num: '03', title: 'Light ribbon', text: 'Sixty side emitting RGB LEDs on a flex strip at 2.5 mm pitch. The firmware draws a comet whose head points at your friend and stays locked to the world as you turn your wrist.',
-  specs: [['LEDs', '60 RGB'], ['Peak draw', '~12 mA seeking'], ['Cost est', '$2.40']],
-}, 0);
-const ledGeo = new THREE.SphereGeometry(0.045, 12, 8);
-const leds = [];
-for (let i = 0; i < N; i++) {
-  const m = new THREE.Mesh(ledGeo, new THREE.MeshBasicMaterial({ color: 0x000000 }));
-  const a = (i / N) * Math.PI * 2;
-  m.position.set(Math.sin(a) * R, 0, -Math.cos(a) * R); // a = 0 is north (-Z)
-  m.userData.part = 'ribbon';
-  ribbon.add(m); leds.push(m);
-}
-const headLight = new THREE.PointLight(0xff4fb8, 1.5, 2.5, 2); ribbon.add(headLight);
-
-// 04 flex brain
-const brain = part('brain', {
-  num: '04', title: 'Flex brain', text: 'A ring shaped flex PCB. nRF52840 runs everything and handles BLE. SX1262 LoRa carries 24 byte encrypted location packets band to band. L76K GNSS takes a fix every 10 s. A 9 axis IMU gives your heading.',
-  specs: [['Radio', 'LoRa 915 / 868 MHz'], ['Range', '~1 km in crowds'], ['Cost est', '$12.80 total']],
-}, -0.75);
-const pcb = new THREE.Mesh(new THREE.TorusGeometry(R, 0.05, 8, 160), new THREE.MeshStandardMaterial({ color: 0x0f3d33, roughness: 0.6 }));
-pcb.rotation.x = Math.PI / 2; pcb.userData.part = 'brain'; brain.add(pcb);
-['nRF52840', 'SX1262', 'L76K', 'IMU', 'PMIC', 'Haptic'].forEach((n, i) => {
-  const chip = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.05, 0.14), new THREE.MeshStandardMaterial({ color: 0x1a1626, metalness: 0.4, roughness: 0.4 }));
-  const a = (i / 6) * Math.PI * 2 + 0.4;
-  chip.position.set(Math.sin(a) * R, 0.04, -Math.cos(a) * R); chip.rotation.y = -a;
-  chip.userData.part = 'brain'; brain.add(chip);
+const crewEl = $('crew');
+CREW.forEach((c, i) => {
+  const b = document.createElement('button'); b.type = 'button';
+  b.innerHTML = `<i style="background:${c.hex};box-shadow:0 0 10px ${c.hex}"></i>${c.name}`;
+  b.onclick = () => choose(i, true);
+  crewEl.appendChild(b);
 });
-
-// 05 battery cells
-const battery = part('battery', {
-  num: '05', title: 'Curved cells', text: 'Two 120 mAh arc LiPo cells on opposite sides of the ring, so the bangle balances on the wrist instead of rolling. About 28 h with normal seeking, about 40 h in festival saver mode.',
-  specs: [['Capacity', '240 mAh total'], ['Average draw', '~8.5 mA'], ['Cost est', '$2.80']],
-}, -1.5);
-const cellMat = new THREE.MeshStandardMaterial({ color: 0xc9c3dc, metalness: 0.9, roughness: 0.25 });
-[0.35, Math.PI + 0.35].forEach((start) => {
-  const c = new THREE.Mesh(new THREE.TorusGeometry(R, 0.07, 12, 60, Math.PI * 0.7), cellMat);
-  c.rotation.x = Math.PI / 2; c.rotation.z = start; c.userData.part = 'battery'; battery.add(c);
-});
-
-// 06 core segment
-const core = part('core', {
-  num: '06', title: 'Core segment', text: 'The slim block at the back of the wrist. Holds the hall sensors, haptic motor and three magnetic charge pins. Squeeze it to seek, hold it to call your crew to you.',
-  specs: [['Charge', 'Magnetic pins, 90 min'], ['Haptic', 'LRA motor'], ['Cost est', '$1.30']],
-}, -2.2);
-const coreMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.6, 8, 16), new THREE.MeshPhysicalMaterial({ metalness: 1, roughness: 0.15, color: 0xeeeaff }));
-coreMesh.rotation.z = Math.PI / 2; coreMesh.position.set(0, 0, -R - 0.05); coreMesh.userData.part = 'core';
-core.add(coreMesh);
-[-0.15, 0, 0.15].forEach((x) => {
-  const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.02, 12), new THREE.MeshStandardMaterial({ color: 0xffd23d, metalness: 1, roughness: 0.2 }));
-  pin.position.set(x, -0.16, -R - 0.05); core.add(pin);
-});
-
-// floor glow
-const floor = new THREE.Mesh(new THREE.CircleGeometry(2.6, 64), new THREE.MeshBasicMaterial({ color: 0x9b6bff, transparent: true, opacity: 0.05 }));
-floor.rotation.x = -Math.PI / 2; floor.position.y = -2.6; scene.add(floor);
-
-// ---------- UI wiring ----------
-function chips(id, list, key, apply) {
-  const el = $(id);
-  list.forEach((o, i) => {
-    const b = document.createElement('button'); b.type = 'button'; b.textContent = o.name;
-    b.onclick = () => { state[key] = i; [...el.children].forEach((c, j) => c.classList.toggle('on', j === i)); apply(); };
-    if (i === state[key]) b.classList.add('on');
-    el.appendChild(b);
-  });
-}
-function applyLook() {
-  const f = FINISHES[state.finish];
-  ringMat.color.set(f.color); ringMat.roughness = f.rough; ringMat.iridescence = f.irid;
-  coreMesh.material.color.set(f.color); coreMesh.material.iridescence = f.irid;
-  const r = RESINS[state.resin];
-  resinMat.color.set(r.color); resinMat.transmission = r.t;
-  gemMeshes.forEach((m) => { m.geometry.dispose(); m.geometry = GEMS[state.gem].geo(); });
-}
-chips('finish', FINISHES, 'finish', applyLook);
-chips('resin', RESINS, 'resin', applyLook);
-chips('gem', GEMS, 'gem', applyLook);
-chips('mood', [{ name: 'Heartbeat' }, { name: 'Aurora' }, { name: 'Still' }], 'mood', () => {});
+function paintCrew() { [...crewEl.children].forEach((b, i) => b.classList.toggle('on', i === S.target)); }
 
 function buzz(n, text) {
-  const el = $('buzz'); el.textContent = `${'◉ '.repeat(n)} ${text}`; el.classList.add('show');
-  clearTimeout(buzz.t); buzz.t = setTimeout(() => el.classList.remove('show'), 1600);
-  if (navigator.vibrate) navigator.vibrate(Array.from({ length: n * 2 - 1 }, (_, i) => (i % 2 ? 80 : 60)));
+  const el = $('buzz'); el.textContent = `${'◉ '.repeat(n)}${text}`; el.classList.add('show');
+  clearTimeout(buzz.t); buzz.t = setTimeout(() => el.classList.remove('show'), 1400);
+  if (navigator.vibrate) try { navigator.vibrate(Array.from({ length: n * 2 - 1 }, (_, i) => (i % 2 ? 70 : 45))); } catch (e) { /* ignore */ }
 }
-function twist(d) {
-  state.sel = (state.sel + d + 8) % 8;
-  const f = CREW[state.sel];
-  buzz(state.sel + 1, `${f.name} · ${f.color}`);
+function setAccent() {
+  const hex = CREW[S.target].hex;
+  document.documentElement.style.setProperty('--accent', hex);
+  guideMat.uniforms.c.value.set(hex);
 }
-$('twistL').onclick = () => twist(-1);
-$('twistR').onclick = () => twist(1);
-host.addEventListener('wheel', (e) => { if (e.shiftKey) { e.preventDefault(); twist(e.deltaY > 0 ? 1 : -1); } }, { passive: false });
-
-// core gestures: click, double, triple, hold
-let clicks = 0, clickT = null, holdT = null, held = false;
-const coreBtn = $('core');
-coreBtn.addEventListener('pointerdown', () => {
-  held = false;
-  holdT = setTimeout(() => {
-    held = true; world.beacon = true; world.beaconUntil = world.t + 120; buzz(3, 'Meet at me sent to crew');
-  }, 2000);
-});
-coreBtn.addEventListener('pointerup', () => {
-  clearTimeout(holdT);
-  if (held) return;
-  clicks++; clearTimeout(clickT);
-  clickT = setTimeout(() => {
-    if (clicks === 1) { state.seeking = !state.seeking; buzz(1, state.seeking ? 'Seeking' : 'Idle'); }
-    else if (clicks === 2) { world.you.ghost = true; world.ghostUntil = world.t + 1800; buzz(2, 'Ghost mode 30 min'); }
-    else { world.sos = !world.sos; state.sosFlash = 0; buzz(5, world.sos ? 'SOS sent to crew' : 'SOS cleared'); }
-    clicks = 0;
-  }, 380);
-});
-$('explode').onclick = (e) => {
-  state.explodeTarget = state.explodeTarget ? 0 : 1;
-  e.currentTarget.classList.toggle('on', !!state.explodeTarget);
-  if (!state.explodeTarget) $('info').hidden = true;
-};
-$('wander').oninput = (e) => (world.wander = +e.target.value);
-$('noise').oninput = (e) => (world.noise = +e.target.value);
-$('speed').oninput = (e) => (state.speed = +e.target.value);
-$('drop').onclick = () => { const f = world.friends[state.sel]; f.dark = !f.dark; if (f.dark) f.lastPacket = world.t - 130; buzz(1, f.dark ? `${f.name} went dark` : `${f.name} back online`); };
-
-// click a component
-const ray = new THREE.Raycaster(); const ndc = new THREE.Vector2();
-let downAt = null;
-renderer.domElement.addEventListener('pointerdown', (e) => (downAt = [e.clientX, e.clientY]));
-renderer.domElement.addEventListener('pointerup', (e) => {
-  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
-  const r = renderer.domElement.getBoundingClientRect();
-  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
-  ray.setFromCamera(ndc, camera);
-  const hit = ray.intersectObjects(scene.children, true).find((h) => h.object.userData.part);
-  if (!hit) { $('info').hidden = true; return; }
-  showInfo(hit.object.userData.part);
-});
-function showInfo(name) {
-  const p = parts[name].info;
-  $('info').innerHTML = `<div class="num">${p.num}</div><h3>${p.title}</h3><p>${p.text}</p><dl>${p.specs.map(([a, b]) => `<dt>${a}</dt><dd style="margin:0">${b}</dd>`).join('')}</dl>`;
-  $('info').hidden = false;
+function choose(i, byUser) {
+  S.target = i; S.pickedByUser = byUser;
+  if (S.mode === 'free') { S.sel = i; buzz(i + 1, `${CREW[i].name} · ${CREW[i].color}`); }
+  else if (byUser && S.step <= 1) { goStep(1); }
+  else if (byUser) { S.sel = i; buzz(i + 1, `${CREW[i].name} · ${CREW[i].color}`); }
+  paintCrew(); setAccent(); setCaption();
 }
+function setCaption() {
+  const s = STEPS[S.step]; const n = CREW[S.target].name;
+  $('capK').textContent = s.k;
+  $('capT').textContent = s.t.replace('Dani', n).replace('her', n === 'Dani' ? 'her' : 'them');
+  let b = s.b.replace(/Dani/g, n);
+  if (s.id === 'found') b = `${n} is right here. You crossed ${Math.round(Math.max(S.walked, Math.hypot(SPOTS[S.target].x - START.x, SPOTS[S.target].z - START.z)))} m of crowd on light alone. Both bands breathe the same color so you spot each other in the crowd.`;
+  $('capB').textContent = b;
+  [...stepsEl.children].forEach((li, i) => li.classList.toggle('on', i === S.step));
+}
+function goStep(i) {
+  S.step = clamp(i, 0, STEPS.length - 1); S.stepT = 0;
+  const id = STEPS[S.step].id;
+  if (id === 'lost' || id === 'pick' || id === 'point') {
+    S.pos = { ...START }; S.heading = 0; S.walked = 0; trail.length = 0; S.foundAt = null;
+    friends.forEach((f) => { f.group.position.set(f.home.x, 0, f.home.z); });
+  }
+  if (id === 'lost') S.sel = 0;
+  if (id === 'pick') S.sel = (S.target + 6) % 8;
+  if (id === 'point' || id === 'walk') S.sel = S.target;
+  if (id === 'found') {
+    S.sel = S.target;
+    const f = friends[S.target].group.position;
+    const a = Math.atan2(S.pos.x - f.x, S.pos.z - f.z);
+    if (Math.hypot(S.pos.x - f.x, S.pos.z - f.z) > 3) { S.pos = { x: f.x + Math.sin(a) * 1.6, z: f.z + Math.cos(a) * 1.6 }; }
+    fireBurst(f.x, f.z, CREW[S.target].hex);
+  }
+  $('wrist').classList.toggle('big', id === 'pick' || id === 'point');
+  $('crew').classList.toggle('ask', id === 'pick');
+  setCaption();
+}
+$('prev').onclick = () => goStep(S.step - 1);
+$('next').onclick = () => (S.step === STEPS.length - 1 ? goStep(0) : goStep(S.step + 1));
+$('play').onclick = () => { S.playing = !S.playing; $('play').textContent = S.playing ? 'Pause' : 'Play'; };
+$('explode').onclick = (e) => { S.explode = !S.explode; e.currentTarget.classList.toggle('on', S.explode); if (!S.explode) $('info').hidden = true; };
 
-// keyboard
+function setMode(m) {
+  S.mode = m;
+  $('modeStory').classList.toggle('on', m === 'story'); $('modeStory').setAttribute('aria-selected', m === 'story');
+  $('modeFree').classList.toggle('on', m === 'free'); $('modeFree').setAttribute('aria-selected', m === 'free');
+  $('story').hidden = m !== 'story'; $('free').hidden = m !== 'free';
+  $('wrist').classList.remove('big'); $('crew').classList.remove('ask');
+  if (m === 'free') { S.sel = S.target; S.foundAt = null; } else goStep(0);
+}
+$('modeStory').onclick = () => setMode('story');
+$('modeFree').onclick = () => setMode('free');
+
 const keys = new Set();
 addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') return;
   keys.add(e.key.toLowerCase());
-  if (e.key === 'q' || e.key === 'Q') twist(-1);
-  if (e.key === 'e' || e.key === 'E') twist(1);
+  if (S.mode === 'free' && (e.key === 'q' || e.key === 'e')) choose((S.target + (e.key === 'e' ? 1 : 7)) % 8, true);
+  if (S.mode === 'free' && e.key.startsWith('Arrow')) e.preventDefault();
 });
 addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 
-// map
-const map = $('map'); const mctx = map.getContext('2d');
-map.addEventListener('click', (e) => {
-  const r = map.getBoundingClientRect();
-  world.you.target = { x: ((e.clientX - r.left) / r.width) * SIZE, y: ((e.clientY - r.top) / r.height) * SIZE };
+// click parts in the wrist view
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+wr.domElement.addEventListener('click', (e) => {
+  if (!S.explode) return;
+  const r = wr.domElement.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, wcam);
+  const hit = ray.intersectObjects(ws.children, true).find((h) => h.object.userData.part);
+  if (!hit) { $('info').hidden = true; return; }
+  const p = band.parts[hit.object.userData.part].info;
+  $('info').innerHTML = `<div class="num">${p.num}</div><h3>${p.title}</h3><p>${p.text}</p><dl>${p.specs.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('')}</dl>`;
+  $('info').hidden = false;
 });
-function drawMap(rels) {
-  const s = map.width / SIZE; const y = world.you;
-  mctx.clearRect(0, 0, map.width, map.height);
-  mctx.strokeStyle = '#1A1230'; mctx.lineWidth = 1;
-  for (let g = 0; g <= SIZE; g += 100) { mctx.beginPath(); mctx.moveTo(g * s, 0); mctx.lineTo(g * s, map.height); mctx.moveTo(0, g * s); mctx.lineTo(map.width, g * s); mctx.stroke(); }
-  STAGES.forEach((st) => {
-    mctx.fillStyle = 'rgba(155,107,255,0.12)'; mctx.beginPath(); mctx.arc(st.x * s, st.y * s, st.r * s, 0, 7); mctx.fill();
-    mctx.fillStyle = '#A89CC8'; mctx.font = '600 10px JetBrains Mono'; mctx.textAlign = 'center'; mctx.fillText(st.name, st.x * s, st.y * s + 3);
+
+// ---------------- minimap ----------------
+const mini = $('mini'), mx = mini.getContext('2d');
+const MAP = { x0: -70, x1: 70, z0: -110, z1: 30 };
+const toMap = (x, z) => [((x - MAP.x0) / (MAP.x1 - MAP.x0)) * mini.width, ((z - MAP.z0) / (MAP.z1 - MAP.z0)) * mini.height];
+function drawMini(t) {
+  const W = mini.width;
+  mx.fillStyle = '#0a0614'; mx.fillRect(0, 0, W, W);
+  mx.fillStyle = 'rgba(155,107,255,0.06)';
+  for (let i = 0; i < fest.people.length; i += 2) { const p = fest.people[i]; const [a, b] = toMap(p.x, p.z); mx.fillRect(a, b, 2, 2); }
+  const [sx, sz] = toMap(-23, STAGE_Z); const [ex] = toMap(23, STAGE_Z);
+  mx.fillStyle = '#FF4FB8'; mx.globalAlpha = 0.6 + 0.3 * Math.sin(t * 3); mx.fillRect(sx, sz - 6, ex - sx, 8); mx.globalAlpha = 1;
+  mx.font = '600 16px JetBrains Mono'; mx.fillStyle = '#A89CC8'; mx.textAlign = 'center'; mx.fillText('MAIN STAGE', W / 2, sz + 26);
+  if (trail.length > 1) {
+    mx.strokeStyle = 'rgba(237,230,255,.5)'; mx.setLineDash([4, 6]); mx.lineWidth = 2; mx.beginPath();
+    trail.forEach((p, i) => { const [a, b] = toMap(p.x, p.z); i ? mx.lineTo(a, b) : mx.moveTo(a, b); }); mx.stroke(); mx.setLineDash([]);
+  }
+  friends.forEach((f, i) => {
+    const [a, b] = toMap(f.group.position.x, f.group.position.z);
+    const on = i === S.target;
+    mx.fillStyle = f.c.hex; mx.globalAlpha = on ? 1 : 0.45;
+    mx.beginPath(); mx.arc(a, b, on ? 8 : 5, 0, 7); mx.fill();
+    if (on) { mx.strokeStyle = f.c.hex; mx.lineWidth = 2; mx.beginPath(); mx.arc(a, b, 14 + (t * 20) % 10, 0, 7); mx.stroke(); }
+    mx.globalAlpha = 1;
   });
-  world.friends.forEach((f, i) => {
-    const k = rels[i];
-    const pos = f.known || f;
-    const on = i === state.sel;
-    if (on && state.seeking) {
-      mctx.strokeStyle = f.hex; mctx.setLineDash([4, 6]); mctx.beginPath(); mctx.moveTo(y.x * s, y.y * s); mctx.lineTo(pos.x * s, pos.y * s); mctx.stroke(); mctx.setLineDash([]);
-    }
-    mctx.globalAlpha = k.dark ? 0.35 : 1;
-    mctx.fillStyle = f.hex; mctx.beginPath(); mctx.arc(pos.x * s, pos.y * s, on ? 7 : 5, 0, 7); mctx.fill();
-    if (on) { mctx.strokeStyle = f.hex; mctx.beginPath(); mctx.arc(pos.x * s, pos.y * s, 12, 0, 7); mctx.stroke(); }
-    mctx.globalAlpha = 1;
-    mctx.fillStyle = '#EDE6FF'; mctx.font = '500 11px Space Grotesk'; mctx.textAlign = 'left'; mctx.fillText(f.name, pos.x * s + 9, pos.y * s - 7);
-  });
-  // you
-  mctx.save(); mctx.translate(y.x * s, y.y * s); mctx.rotate(y.heading * Math.PI / 180);
-  if (world.beacon) { mctx.strokeStyle = '#D4FF3A'; mctx.beginPath(); mctx.arc(0, 0, 18 + (performance.now() / 40) % 20, 0, 7); mctx.stroke(); }
-  mctx.fillStyle = world.sos ? '#FF3B3B' : '#EDE6FF';
-  mctx.beginPath(); mctx.moveTo(0, -11); mctx.lineTo(7, 8); mctx.lineTo(0, 4); mctx.lineTo(-7, 8); mctx.closePath(); mctx.fill();
-  mctx.restore();
-  if (y.target) { mctx.strokeStyle = '#EDE6FF'; mctx.beginPath(); mctx.arc(y.target.x * s, y.target.y * s, 5, 0, 7); mctx.stroke(); }
+  const [ux, uz] = toMap(S.pos.x, S.pos.z);
+  mx.save(); mx.translate(ux, uz); mx.rotate(S.heading * Math.PI / 180);
+  mx.fillStyle = '#FFFFFF'; mx.beginPath(); mx.moveTo(0, -12); mx.lineTo(8, 9); mx.lineTo(0, 4); mx.lineTo(-8, 9); mx.closePath(); mx.fill();
+  mx.restore();
 }
 
-function fmt(d) { return d >= 1000 ? (d / 1000).toFixed(1) + ' km' : Math.round(d) + ' m'; }
-
-function readout(rels) {
-  const f = CREW[state.sel]; const k = rels[state.sel];
-  let msg;
-  if (world.sos) msg = 'SOS active. Every crew band is flashing red and pointing at you.';
-  else if (!state.seeking) msg = 'Idle. Click the core to start seeking.';
-  else if (k.stale) msg = `No packet for ${Math.round(k.age)} s. Hollow light aims at their last known spot.`;
-  else if (k.ble) msg = 'Under 10 m. BLE took over and the whole ring breathes. Look up.';
-  else if (k.dist > 250) msg = 'Far. Long comet tail, slow haptic tick.';
-  else msg = 'Closing in. Tail shortens as you get closer.';
-  $('readout').innerHTML = `<div class="label">Seeking</div>
-    <div class="read-big"><span class="name" style="color:${f.hex}">${f.name}</span><span class="dist">${fmt(k.dist)}</span></div>
-    <div class="read-state">${msg}</div>
-    <div class="crew">${world.friends.map((x, i) => `<div class="${rels[i].dark ? 'dead' : ''}"><i style="background:${x.hex}"></i>${x.name} ${fmt(rels[i].dist)}</div>`).join('')}</div>`;
-  $('hud').innerHTML = `<span>HDG <b>${Math.round(world.you.heading)}°</b></span><span>BAT <b>${world.you.battery.toFixed(0)}%</b></span><span>${world.you.ghost ? '<b>GHOST</b>' : 'VISIBLE'}</span><span>${world.beacon ? '<b>BEACON</b>' : ''}</span>`;
-}
-
-// ---------- light rendering ----------
-const tmp = new THREE.Color();
-function drawLights(rels, t) {
-  const f = CREW[state.sel]; const k = rels[state.sel];
-  const col = new THREE.Color(f.hex);
-  if (world.sos) {
-    const on = Math.floor(t * 4) % 2 === 0;
-    leds.forEach((l) => l.material.color.set(on ? 0xff2020 : 0x110000));
-    headLight.color.set(0xff2020); headLight.intensity = on ? 2 : 0; return;
-  }
-  if (world.beacon) {
-    leds.forEach((l, i) => { l.material.color.set(CREW[Math.floor(i / (N / 8))].hex).multiplyScalar(0.6 + 0.4 * Math.sin(t * 4 + i * 0.3)); });
-    headLight.intensity = 0; return;
-  }
-  if (!state.seeking) {
-    leds.forEach((l, i) => {
-      let v = 0;
-      if (state.mood === 0) v = 0.15 + 0.15 * Math.max(0, Math.sin(t * 3));
-      if (state.mood === 1) tmp.setHSL((i / N + t * 0.05) % 1, 0.8, 0.5);
-      if (state.mood === 1) l.material.color.copy(tmp).multiplyScalar(0.35);
-      else l.material.color.copy(col).multiplyScalar(v);
-    });
-    headLight.intensity = 0; return;
-  }
-  if (k.ble) {
-    const v = 0.55 + 0.45 * Math.sin(t * 5);
-    leds.forEach((l) => l.material.color.copy(col).multiplyScalar(v * 1.6));
-    headLight.color.copy(col); headLight.position.set(0, 0, 0); headLight.intensity = 2 * v; return;
-  }
-  // comet: rel bearing is where the friend is relative to your heading.
-  // The bangle model is drawn north up in its own frame, so we rotate the light, not the band.
-  const head = k.rel;
-  const tail = Math.max(20, Math.min(170, k.dist / 2.5));
-  leds.forEach((l, i) => {
-    const ang = (i / N) * 360;
-    const diff = ((head - ang) % 360 + 360) % 360;
-    let v = diff <= tail ? Math.pow(1 - diff / tail, 1.6) : 0;
-    if (k.stale) v = diff < 6 || diff > 354 ? 0.6 : 0.02 * (i % 4 === 0);
-    l.material.color.copy(col).multiplyScalar(0.02 + v * 2.2);
-  });
-  const a = head * Math.PI / 180;
-  headLight.color.copy(col); headLight.position.set(Math.sin(a) * R, 0.1, -Math.cos(a) * R); headLight.intensity = k.stale ? 0.3 : 1.5;
-}
-
-// ---------- loop ----------
+// ---------------- loop ----------------
 function resize() {
-  const w = host.clientWidth, h = host.clientHeight;
-  renderer.setSize(w, h); composer.setSize(w, h); bloom.resolution.set(w, h);
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h); composer.setSize(w, h); bloom.resolution.set(w, h); labels.setSize(w, h);
   camera.aspect = w / h; camera.updateProjectionMatrix();
 }
-new ResizeObserver(resize).observe(host); resize();
+addEventListener('resize', resize); resize();
+new ResizeObserver(() => {
+  const w = wristEl.clientWidth, h = wristEl.clientHeight; if (!w || !h) return;
+  wr.setSize(w, h); wcomp.setSize(w, h); wbloom.resolution.set(w, h);
+  wcam.aspect = w / h; wcam.updateProjectionMatrix();
+}).observe(wristEl);
 
-let last = performance.now();
-function loop(now) {
+const fwdVec = (deg) => ({ x: Math.sin(deg * Math.PI / 180), z: -Math.cos(deg * Math.PI / 180) });
+const camTarget = new THREE.Vector3(), lookTarget = new THREE.Vector3();
+let last = performance.now(), pickTick = 0;
+
+function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
-  const sdt = dt * state.speed;
-  const fwd = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
-  const turn = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
-  move(world, fwd * state.speed, turn, dt);
-  step(world, sdt);
-  const rels = world.friends.map((f) => relation(world, f));
+  const t = now / 1000;
+  const f = friends[S.target];
+  const fp = f.group.position;
+  const dx = fp.x - S.pos.x, dz = fp.z - S.pos.z;
+  const dist = Math.hypot(dx, dz);
+  const bearing = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
+  const step = STEPS[S.step].id;
 
-  // ring spins so the selected gem sits over the front notch (+Z)
-  const want = -(state.sel / 8) * Math.PI * 2;
-  let d = want - state.ringAngle; d = Math.atan2(Math.sin(d), Math.cos(d));
-  state.ringAngle += d * Math.min(1, dt * 10);
-  ringPivot.rotation.y = state.ringAngle;
-  gemMeshes.forEach((m, i) => { const s = i === state.sel ? 1.45 : 1; m.scale.lerp(new THREE.Vector3(s, s, s), dt * 10); m.rotation.y += dt; });
+  if (S.mode === 'story') {
+    if (S.playing) S.stepT += dt;
+    const dur = STEPS[S.step].dur;
+    if (step === 'pick' && S.playing) {
+      pickTick += dt;
+      if (pickTick > 0.75 && S.sel !== S.target) { pickTick = 0; S.sel = (S.sel + 1) % 8; buzz(S.sel + 1, `${CREW[S.sel].name} · ${CREW[S.sel].color}`); }
+    }
+    if (step === 'walk' && S.playing) {
+      const desired = bearing;
+      const weave = Math.sin(t * 1.7) * 9;
+      const diff = wrap180(desired + weave - S.heading);
+      const turnRate = S.stepT < 1.2 ? 0 : 75;
+      S.heading = (S.heading + clamp(diff, -turnRate * dt, turnRate * dt) + 360) % 360;
+      if (S.stepT > 1.2 && Math.abs(wrap180(desired - S.heading)) < 50 && dist > 1.8) {
+        const sp = (dist < 10 ? 1.8 : 3.4) * dt; const v = fwdVec(S.heading);
+        S.pos.x += v.x * sp; S.pos.z += v.z * sp; S.walked += sp;
+        if (!trail.length || Math.hypot(trail.at(-1).x - S.pos.x, trail.at(-1).z - S.pos.z) > 1) trail.push({ ...S.pos });
+      }
+      if (dist < 2.2) goStep(4);
+    }
+    if (dur && S.stepT > dur && S.playing) { if (S.step < STEPS.length - 1) goStep(S.step + 1); }
+    S.bandMode = step === 'lost' ? 'idle' : step === 'pick' ? (S.sel === S.target ? 'seek' : 'pick') : step === 'found' ? 'found' : dist < 10 ? 'hot' : 'seek';
+    // progress bars
+    [...stepsEl.children].forEach((li, i) => {
+      const bar = li.querySelector('i');
+      const d = STEPS[i].dur;
+      bar.style.width = i < S.step ? '100%' : i > S.step ? '0%' : `${d ? clamp(S.stepT / d, 0, 1) * 100 : clamp(1 - (dist - 2) / 45, 0, 1) * 100}%`;
+    });
+  } else {
+    const fwd = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
+    const turn = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
+    S.heading = (S.heading + turn * 95 * dt + 360) % 360;
+    if (fwd) { const v = fwdVec(S.heading); S.pos.x += v.x * fwd * 4 * dt; S.pos.z += v.z * fwd * 4 * dt; S.walked += Math.abs(fwd) * 4 * dt; if (!trail.length || Math.hypot(trail.at(-1).x - S.pos.x, trail.at(-1).z - S.pos.z) > 1) trail.push({ ...S.pos }); }
+    if (dist < 2.2 && !S.foundAt) { S.foundAt = t; fireBurst(fp.x, fp.z, f.c.hex); buzz(3, `Found ${f.c.name}`); }
+    if (dist > 4) S.foundAt = null;
+    S.bandMode = S.foundAt ? 'found' : dist < 10 ? 'hot' : 'seek';
+    // crew drift gently in free roam
+    friends.forEach((fr, i) => { if (i === S.target && dist < 6) return; fr.group.position.x = fr.home.x + Math.sin(t * 0.07 + fr.ph) * 6; fr.group.position.z = fr.home.z + Math.cos(t * 0.05 + fr.ph) * 6; });
+  }
 
-  state.exploded += (state.explodeTarget - state.exploded) * Math.min(1, dt * 6);
-  Object.values(parts).forEach((p) => (p.group.position.y = p.explodeY * state.exploded));
+  // avatars
+  you.group.position.set(S.pos.x, 0, S.pos.z);
+  you.group.rotation.y = -S.heading * Math.PI / 180;
+  const moving = S.mode === 'story' ? step === 'walk' && S.stepT > 1.2 : keys.size > 0;
+  you.body.position.y = moving ? Math.abs(Math.sin(t * 9)) * 0.06 : Math.abs(Math.sin(t * 3)) * 0.03;
+  const bandHex = S.bandMode === 'idle' ? '#EDE6FF' : CREW[S.sel].hex;
+  you.band.material.color.set(bandHex); you.glow.color.set(bandHex);
+  you.glow.intensity = S.bandMode === 'idle' ? 0.6 : 2.5 + Math.sin(t * 6) * (S.bandMode === 'hot' || S.bandMode === 'found' ? 1.5 : 0.3);
+  friends.forEach((fr, i) => {
+    const on = i === S.target;
+    fr.body.position.y = Math.abs(Math.sin(t * 2.4 + fr.ph)) * 0.12;
+    const found = S.bandMode === 'found' && on;
+    if (found) { fr.group.rotation.y = Math.atan2(S.pos.x - fr.group.position.x, S.pos.z - fr.group.position.z); }
+    else fr.group.rotation.y = Math.PI + Math.sin(t * 0.8 + fr.ph) * 0.3;
+    const pulse = on && (S.bandMode === 'hot' || found) ? 2 + Math.sin(t * 6) * 1.5 : on && step !== 'lost' ? 1.6 : 0.5;
+    fr.glow.intensity = pulse;
+    fr.halo.visible = on && (step !== 'lost' || S.mode === 'free');
+    fr.halo.scale.setScalar(1 + ((t * 0.8) % 1) * (found ? 2.5 : 0.6));
+    fr.halo.material.opacity = 0.6 * (1 - ((t * 0.8) % 1));
+    const d = Math.hypot(fr.group.position.x - S.pos.x, fr.group.position.z - S.pos.z);
+    const showLabel = (S.mode === 'story' && step === 'lost') || on;
+    fr.lab.visible = showLabel;
+    fr.el.className = 'label' + (step === 'lost' && S.mode === 'story' ? ' ghost' : '');
+    fr.el.textContent = step === 'lost' && S.mode === 'story' ? `${fr.c.name.toUpperCase()} ?` : `${fr.c.name.toUpperCase()} · ${Math.round(d)} M`;
+  });
+  youLabel.visible = S.mode === 'story' && step === 'lost';
 
-  drawLights(rels, now / 1000);
-  drawMap(rels);
-  if (Math.floor(now / 200) !== Math.floor((now - dt * 1000) / 200)) readout(rels);
-  controls.update();
+  // ground guide
+  const showGuide = S.mode === 'story' ? step === 'point' || step === 'walk' : true;
+  guideMat.uniforms.o.value += ((showGuide && dist > 2.5 ? (step === 'point' ? 0.9 : 0.45) : 0) - guideMat.uniforms.o.value) * Math.min(1, dt * 3);
+  guideMat.uniforms.t.value = t;
+  guide.position.set(S.pos.x, 0.03, S.pos.z);
+  guide.rotation.y = -bearing * Math.PI / 180;
+  guide.scale.set(0.6, 1, Math.max(0.1, dist - 1));
+
+  // burst physics
+  if (burst.material.opacity > 0) {
+    for (let i = 0; i < burstN; i++) { bv[i][1] -= 4 * dt; bp[i * 3] += bv[i][0] * dt; bp[i * 3 + 1] = Math.max(0.05, bp[i * 3 + 1] + bv[i][1] * dt); bp[i * 3 + 2] += bv[i][2] * dt; }
+    burstGeo.attributes.position.needsUpdate = true; burst.material.opacity = Math.max(0, burst.material.opacity - dt * 0.35);
+  }
+
+  // camera choreography
+  const h = S.heading * Math.PI / 180;
+  const back = (dist, up, side = 0) => camTarget.set(S.pos.x - Math.sin(h) * dist + Math.cos(h) * side, up, S.pos.z + Math.cos(h) * dist + Math.sin(h) * side);
+  if (S.mode === 'free') { back(7, 3.6); const v = fwdVec(S.heading); lookTarget.set(S.pos.x + v.x * 8, 1.4, S.pos.z + v.z * 8); }
+  else if (step === 'lost') {
+    const a = t * 0.12, r = 34 - Math.min(14, S.stepT * 1.6);
+    camTarget.set(S.pos.x + Math.sin(a) * r, 26 - Math.min(14, S.stepT * 1.5), S.pos.z + Math.cos(a) * r); lookTarget.set(S.pos.x, 1, S.pos.z - 4);
+  } else if (step === 'pick') { back(4.2, 2.6, 1.2); lookTarget.set(S.pos.x, 1.5, S.pos.z - 6); }
+  else if (step === 'point') { back(9, 7.5, 2); lookTarget.set((S.pos.x + fp.x) / 2, 0.5, (S.pos.z + fp.z) / 2); }
+  else if (step === 'walk') { back(7.5, 3.8); const v = fwdVec(S.heading); lookTarget.set(S.pos.x + v.x * 10, 1.3, S.pos.z + v.z * 10); }
+  else if (step === 'found') {
+    const a = t * 0.25, mxp = (S.pos.x + fp.x) / 2, mzp = (S.pos.z + fp.z) / 2;
+    camTarget.set(mxp + Math.sin(a) * 5.5, 2.6, mzp + Math.cos(a) * 5.5); lookTarget.set(mxp, 1.3, mzp);
+  }
+  const k = 1 - Math.exp(-dt * (step === 'lost' && S.mode === 'story' ? 1.2 : 2.2));
+  S.cam.lerp(camTarget, k); S.look.lerp(lookTarget, k);
+  camera.position.copy(S.cam); camera.lookAt(S.look);
+
+  fest.update(t, [{ x: S.pos.x, z: S.pos.z }, ...friends.map((fr) => ({ x: fr.group.position.x, z: fr.group.position.z }))]);
+
+  // band
+  const rel = (bearing - S.heading + 360) % 360;
+  band.update(dt, t, { sel: S.sel, rel, dist, mode: S.bandMode, explode: S.explode });
+  const wa = t * 0.15;
+  const wd = S.explode ? 11.5 : 8;
+  wcam.position.set(Math.sin(wa) * 0.6, wd * 0.82, wd * 0.58); wcam.lookAt(0, S.explode ? -0.3 : 0, 0);
+  $('wristMode').textContent = { idle: 'Idle', pick: 'Choosing', seek: `Seeking ${CREW[S.sel].name}`, hot: 'Under 10 m', found: 'Found' }[S.bandMode];
+  $('dist').textContent = step === 'lost' && S.mode === 'story' ? '· · ·' : `${Math.round(dist)} m`;
+  $('bandBat').textContent = `${Math.max(1, 86 - Math.floor(S.walked / 40))}%`;
+
+  drawMini(t);
   composer.render();
-  requestAnimationFrame(loop);
+  labels.render(scene, camera);
+  wcomp.render();
+  requestAnimationFrame(frame);
 }
-requestAnimationFrame(loop);
+
+paintCrew(); setAccent(); goStep(0);
+requestAnimationFrame(frame);
