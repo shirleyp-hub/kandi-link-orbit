@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -9,61 +9,59 @@
   <link rel="stylesheet" href="./src/style.css">
 </head>
 <body>
+  <div id="world" class="world" aria-label="Festival scene"></div>
+  <div class="vignette" aria-hidden="true"></div>
+
   <header class="top">
     <div class="logo">KANDI<span> LINK</span></div>
-    <div class="tag">ORBIT live simulator</div>
-    <div class="hud" id="hud"></div>
+    <div class="modes" role="tablist" aria-label="Mode">
+      <button type="button" role="tab" id="modeStory" class="on" aria-selected="true">Story</button>
+      <button type="button" role="tab" id="modeFree" aria-selected="false">Free roam</button>
+    </div>
   </header>
 
-  <main class="layout">
-    <section class="stage">
-      <div id="three" class="three" aria-label="3D view of the ORBIT bangle"></div>
-      <div class="stage-bar">
-        <button type="button" id="twistL">Twist left</button>
-        <button type="button" id="core" class="core">Core</button>
-        <button type="button" id="twistR">Twist right</button>
-        <button type="button" id="explode" class="ghost">Exploded view</button>
-      </div>
-      <div class="buzz" id="buzz" aria-live="polite"></div>
-      <div class="info" id="info" hidden></div>
-    </section>
+  <aside class="story" id="story">
+    <ol class="steps" id="steps"></ol>
+    <div class="caption">
+      <div class="cap-k" id="capK"></div>
+      <h1 id="capT"></h1>
+      <p id="capB"></p>
+    </div>
+    <div class="controls">
+      <button type="button" id="prev" aria-label="Previous step">Back</button>
+      <button type="button" id="play" class="primary">Pause</button>
+      <button type="button" id="next" aria-label="Next step">Next</button>
+    </div>
+  </aside>
 
-    <aside class="side">
-      <div class="panel">
-        <div class="label">Festival map, 800 m square</div>
-        <canvas id="map" width="560" height="560" aria-label="Festival map with you and your crew"></canvas>
-        <div class="hint">WASD or arrows to walk and turn. Q and E twist. Click the map to auto walk.</div>
-      </div>
+  <aside class="free" id="free" hidden>
+    <div class="cap-k">Free roam</div>
+    <p>WASD or arrow keys to walk and turn. Q and E twist the ring. Pick anyone below and find them yourself.</p>
+  </aside>
 
-      <div class="panel" id="readout"></div>
+  <div class="status" id="status">
+    <div class="stat dead"><span class="k">Phone</span><span class="v">0%</span></div>
+    <div class="stat dead"><span class="k">Signal</span><span class="v">None</span></div>
+    <div class="stat"><span class="k">Band</span><span class="v" id="bandBat">86%</span></div>
+    <div class="stat hi"><span class="k">To friend</span><span class="v" id="dist">· · ·</span></div>
+  </div>
 
-      <div class="panel">
-        <div class="label">Core gestures</div>
-        <ul class="gestures">
-          <li><b>Click</b> start or stop seeking</li>
-          <li><b>Hold 2 s</b> meet at me beacon</li>
-          <li><b>Double click</b> ghost mode</li>
-          <li><b>Triple click</b> SOS to crew</li>
-        </ul>
-      </div>
+  <div class="crew" id="crew" aria-label="Pick a friend"></div>
 
-      <div class="panel">
-        <div class="label">Customize</div>
-        <div class="row"><span>Ring</span><div class="chips" id="finish"></div></div>
-        <div class="row"><span>Resin</span><div class="chips" id="resin"></div></div>
-        <div class="row"><span>Gem cut</span><div class="chips" id="gem"></div></div>
-        <div class="row"><span>Idle light</span><div class="chips" id="mood"></div></div>
-      </div>
+  <div class="mini"><canvas id="mini" width="440" height="440" aria-label="Map of the festival"></canvas></div>
 
-      <div class="panel">
-        <div class="label">Simulation</div>
-        <div class="row"><span>Crew wander</span><input type="range" id="wander" min="0" max="3" step="0.1" value="1"></div>
-        <div class="row"><span>GPS noise</span><input type="range" id="noise" min="0" max="10" step="0.5" value="4"></div>
-        <div class="row"><span>Time speed</span><input type="range" id="speed" min="1" max="20" step="1" value="5"></div>
-        <button type="button" id="drop" class="ghost wide">Drop a friend's signal</button>
-      </div>
-    </aside>
-  </main>
+  <section class="wrist" id="wrist" aria-label="Your band">
+    <div class="wrist-view" id="wristView"></div>
+    <div class="facing" aria-hidden="true">YOU FACE ▲</div>
+    <div class="wrist-bar">
+      <span id="wristMode">Idle</span>
+      <button type="button" id="explode">Inside the band</button>
+    </div>
+    <div class="info" id="info" hidden></div>
+  </section>
+
+  <div class="buzz" id="buzz" aria-live="polite"></div>
+
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>

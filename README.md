@@ -1,8 +1,16 @@
 # KANDI LINK · ORBIT simulator
 
-A live, interactive 3D simulator of ORBIT, a paired festival bangle that finds your friends with light instead of a screen.
+A live 3D story of ORBIT, a paired festival bangle that finds your friends with light instead of a screen.
 
-Twist the selector ring to a friend's gem. A comet of light inside the clear resin points at them and stays locked to the world as you turn. The tail shortens as you close in. Under 10 m the whole ring breathes their color.
+## The story
+
+1. **Lost.** Headliner drops, phone dies, crew disappears into 900 people.
+2. **Pick.** Twist the selector ring to a friend's gem. One buzz per click.
+3. **Point.** A point of light swings around the band to where they are.
+4. **Walk.** Turn until the light sits ahead and follow it. It stays locked on your friend as you move, and the tail shortens as you close in.
+5. **Found.** Under 10 m both bands breathe the same color and the crowd parts.
+
+Pick any of the 8 crew members during the story to change who you find. Switch to **Free roam** to walk the festival yourself with WASD or the arrow keys, and twist with Q and E.
 
 ## Run it
 
@@ -11,30 +19,14 @@ npm install
 npm run dev
 ```
 
-Open the local URL Vite prints.
+## What is on screen
 
-## Controls
-
-| Input | Action |
+| Area | Shows |
 | --- | --- |
-| Twist left / right, Q / E, Shift + scroll | Pick a friend |
-| Core click | Start or stop seeking |
-| Core hold 2 s | Meet at me beacon, crew walks to you |
-| Core double click | Ghost mode for 30 min |
-| Core triple click | SOS, ring flashes red |
-| WASD or arrows | Walk and turn on the festival map |
-| Click the map | Auto walk to that spot |
-| Drag the 3D view | Orbit the bangle |
-| Exploded view, then click a part | Component specs |
-
-## What is simulated
-
-* 8 friends wander between stages on an 800 m festival map
-* Each band sends a GNSS fix over LoRa every 10 s with adjustable GPS noise
-* Bearing minus your compass heading drives the light comet
-* Under 10 m BLE proximity takes over
-* Dropped signals show the last known position
-* Customize ring finish, resin tint, gem cut and idle light
+| Festival | Main stage with LED wall, lasers and beams, 900 dancing ravers, your crew |
+| Band view | Close up of your ORBIT with the live light comet. Tap **Inside the band** and click any part for specs |
+| Map | Top down view with your path and your friend |
+| Status | Phone dead, no signal, band battery, live distance |
 
 ## Components modeled
 
@@ -42,7 +34,7 @@ Open the local URL Vite prints.
 | --- | --- | --- |
 | 01 | Selector ring | Titanium, 8 magnetic detents, snap gems |
 | 02 | Resin shell | Clear cast PU, frosted inner face, IP54 |
-| 03 | Light ribbon | 60 side emitting RGB LEDs |
+| 03 | Light ribbon | 72 side emitting RGB LEDs |
 | 04 | Flex brain | nRF52840, SX1262 LoRa, L76K GNSS, 9 axis IMU |
 | 05 | Curved cells | 2 x 120 mAh arc LiPo |
 | 06 | Core segment | Hall sensors, haptic, magnetic charge pins |
@@ -51,6 +43,6 @@ Costs and battery figures are concept estimates, not supplier quotes.
 
 ## Deploy
 
-Pushing to `main` builds and publishes to GitHub Pages through `.github/workflows/pages.yml`. Turn on Pages in the repo settings with source set to GitHub Actions.
+Pushing to `main` builds and publishes to GitHub Pages through `.github/workflows/pages.yml`. Turn on Pages in repo settings with source set to GitHub Actions.
 
 Built with Three.js and Vite.
